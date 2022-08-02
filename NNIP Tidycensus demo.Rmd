@@ -1,0 +1,205 @@
+---
+title: "NNIP Data Presentation"
+author: "Cristina Martinez, MPH - CI:Now"
+date: "July 28, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Downloading Census Data using Tidycensus
+
+You will need **Census API Key** to use tidycensus
+You can get one here: <https://api.census.gov/data/key_signup.html>
+
+
+Resources used to put this demonstration together:
+
+Analyzing US Census Data by Kyle Walker (Book):
+<https://walker-data.com/census-r/index.html>
+
+Basic usage of Tidycensus:
+<https://walker-data.com/tidycensus/articles/basic-usage.html>
+
+Working with Census microdata:
+<https://walker-data.com/tidycensus/articles/pums-data.html>
+
+```{r}
+#install.packages("tidycensus") ## To install package. Only has to be done once.
+
+#Load Tidycensus library
+library(tidycensus)
+library(tidyverse) #another useful package for manipulating and reshaping data
+
+## INSTALL KEY AND STORE IN R ENVIRONMENT
+census_api_key("YOUR KEY GOES HERE", install = TRUE)
+```
+
+# Tidycensus has the following core functions
+```{r}
+get_decennial() # US Decennial Census API for 2000, 2010, 2020
+
+get_acs()       # 1 (2005) & 5 (2005-2009) Year ACS
+
+get_estimates() # Population Estimates by state, county, and MSA
+
+get_pums()      # ACS Public Use Microdata Samples
+
+get_flows()     # ACS Migration Flows
+```
+
+We'll focus on get_acs() and get_pums() for this demonstration.
+
+# Pulling ACS data
+```{r}
+# SEARCH FOR VARIABLES
+
+# detailed tables
+load_variables(2020, "acs5", cache = TRUE) # can also call "acs1"
+
+#Save to an object
+var20 <- load_variables(2020, "acs5", cache = TRUE) # can also call "acs1"
+View(var20)
+
+# subject tables
+load_variables(2020, "acs5/subject", cache = TRUE)
+
+# profile tables
+load_variables(2020, "acs5/profile", cache = TRUE)
+```
+
+# Pull Median Household Income
+```{r}
+tx <- get_acs(geography = "county", # can also call "us", "region", "state", "tract", "block group" among many other geos
+              variables = "B19013_001", 
+              state = "TX", 
+              year = 2020,
+              survey = "acs5")
+
+tx
+```
+
+# Pull Median Household Income for all households and Hispanic/Latino households
+```{r}
+tx <- get_acs(geography = "county", 
+              variables = c("B19013_001", "B19013I_001"), #pull multiple variables
+              output = "wide", # can change the output of the data so it's wide
+              state = "TX", 
+              year = 2019, # change year for different survey years
+              survey = "acs1") #change survey for acs1 or acs5
+
+tx
+```
+
+# You can also pull an entire table by using "table = " instead of "variable = "
+```{r}
+tx <- get_acs(geography = "county", 
+              table = "B01001", # Population by age and sex. Can only pull one table at a time
+              output = "wide", 
+              state = "TX", 
+              year = 2020,
+              survey = "acs5") 
+
+tx
+```
+
+# Easily calculate new estimates and margins of error
+```{r}
+tx <- get_acs(geography = "tract",
+              variables = c(totalpop = "B01001_001", malepop = "B01001_002", femalepop = "B01001_026"),
+              output = "wide",
+              county = "Bexar",
+              state = "TX") #defaults to 2020 ACS 5 year
+
+tx
+
+tx <- tx %>%
+  mutate(
+    percent.male = malepopE/totalpopE * 100, 
+    percent.male.moe = moe_prop(malepopE, totalpopE, malepopM, totalpopM) * 100, # Calculates the moe for the new proportion
+    percent.female = femalepopE/totalpopE * 100, 
+    percent.female.moe = moe_prop(femalepopE, totalpopE, femalepopM, totalpopM) * 100
+  ) %>%
+  select(NAME, percent.male:percent.female.moe) %>%
+  arrange(NAME) #Arranges data frame in ascending order based on the NAME column
+
+tx
+```
+
+# Pulling data for multiple years
+```{r}
+years <- 2017:2019
+names(years) <- years
+
+pop.by.age <- map_dfr(years, ~{
+  get_acs(
+    geography = "county",
+    variables = c("B01001_001", "B01001_002", "B01001_026"),
+    state = "TX",
+    output = "wide",
+    survey = "acs1",
+    year = .x
+  )
+}, .id = "year")
+
+pop.by.age
+```
+
+# Mapping using Tidycensus
+```{r}
+options(tigris_use_cache = TRUE) # used to cache the downloaded geographic data on the user’s computer
+
+dc_income <- get_acs(
+  geography = "tract", 
+  variables = "B19013_001", #median household income
+  state = "DC", 
+  year = 2020,
+  geometry = TRUE # use this argument when you want to download corresponding shape files
+)
+
+dc_income
+
+plot(dc_income["estimate"])
+
+# See Chapter 6 of Analyzing US Census Data for more detailed examples
+```
+
+# Working with microdata (PUMS)
+```{r}
+#SEARCH FOR VARIABLES
+pums_vars_19 <- pums_variables %>% 
+  filter(year == 2019, survey == "acs1")
+
+View(pums_vars_19)
+```
+
+# Pull microdata
+```{r}
+hi_pums <- get_pums(
+  variables = c("PUMA", "SEX", "AGEP", "SCHL"), # Pulling sex, age, and educational attainment
+  state = "HI",
+  survey = "acs5",
+  year = 2020,
+  recode = TRUE, # This argument will give you the data labels
+  #rep_weights = "person" # Can also get "household", or "both". Downloading replicated weights takes about 5-10 minutes.
+  )
+
+hi_pums
+#Automatically returns unique identifiers, individual and household weights, and state
+```
+
+# Estimated population
+```{r}
+sum(hi_pums$PWGTP) # Individuals
+sum(hi_pums$WGTP)  # Households
+```
+
+# Estimated population by PUMA and SEX
+```{r}
+hi_pums %>% 
+  count(PUMA, SEX_label, wt = PWGTP)
+
+# See Chapters 9 and 10 of Analyzing US Census Data for more information on analyzing PUMS data
+```
