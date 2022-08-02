@@ -1,2 +1,3 @@
-# nnip_tidycensus_demo
-Demonstration of how to use tidycensus in R
+# Tidycensus Demo
+A few ways to use to pull ACS and PUMS data using Tidycensus. 
+Always open to suggestions! Thanks for stopping by :)
